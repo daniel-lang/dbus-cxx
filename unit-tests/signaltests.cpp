@@ -27,6 +27,7 @@
 static std::shared_ptr<DBus::Dispatcher> dispatch;
 static std::string signal_value;
 static int num_rx = 0;
+static int array_length = 0;
 
 void sigHandle( std::string value ) {
     signal_value = value;
@@ -34,6 +35,12 @@ void sigHandle( std::string value ) {
 
 void voidSigHandle() {
     num_rx++;
+}
+
+void arraySigHandler(std::vector<std::string> value) {
+    num_rx++;
+    signal_value = value[0];
+    array_length = value.size();
 }
 
 bool signal_create() {
@@ -81,6 +88,34 @@ bool signal_void_txrx() {
     proxy->connect( sigc::ptr_fun( voidSigHandle ) );
 
     signal->emit();
+    sleep( 1 );
+
+    TEST_ASSERT_RET_FAIL( num_rx == 1 );
+    return true;
+}
+
+bool signal_array_txrx() {
+    std::shared_ptr<DBus::Connection> conn = dispatch->create_connection( DBus::BusType::SESSION );
+
+    std::shared_ptr<DBus::Signal<void(std::vector<std::string>)>> signal = conn->create_free_signal<void(std::vector<std::string>)>( "/test/signal", "test.signal.type", "ExampleMember" );
+    std::shared_ptr<DBus::SignalProxy<void(std::vector<std::string>)>> proxy = conn->create_free_signal_proxy<void(std::vector<std::string>)>(
+                DBus::MatchRuleBuilder::create()
+                .set_path( "/test/signal" )
+                .set_interface( "test.signal.type" )
+                .set_member( "ExampleMember" )
+                .as_signal_match(),
+                DBus::ThreadForCalling::DispatcherThread );
+
+    proxy->connect( sigc::ptr_fun( arraySigHandler ) );
+
+    signal->emit( { "TestSignal" } );
+    sleep( 1 );
+
+    TEST_ASSERT_RET_FAIL( num_rx == 1 );
+    TEST_ASSERT_RET_FAIL( signal_value.compare( "TestSignal" ) == 0 );
+    TEST_ASSERT_RET_FAIL( array_length == 1 );
+
+    signal->emit( { } );
     sleep( 1 );
 
     TEST_ASSERT_RET_FAIL( num_rx == 1 );
@@ -226,6 +261,7 @@ int main( int argc, char** argv ) {
     ADD_TEST( create );
     ADD_TEST( tx_rx );
     ADD_TEST( void_txrx );
+    ADD_TEST( array_txrx );
     ADD_TEST( path_match_only );
     ADD_TEST( interface_match_only );
     ADD_TEST( member_match_only );
